@@ -17,6 +17,9 @@ static int ora_strxcmp(const char * s1, int l1, const char * s2, int l2)
     return l1 - l2;
 }
 
+//////////////////////////////////////////////////////////////////////////
+/// class ApkDirNode
+//////////////////////////////////////////////////////////////////////////
 
 ApkDirNode::ApkDirNode()
     : pName_(NULL)
@@ -26,6 +29,8 @@ ApkDirNode::ApkDirNode()
 
 ApkDirNode::~ApkDirNode()
 {
+    //we don't need to delete pName_ here.
+
     if (NULL != pChildren_)
         delete[] pChildren_;
 }
@@ -67,6 +72,7 @@ ApkDirNode * ApkDirNode::find(const char * name) const
         ++end;
     size_t nameLen = end - name;
 
+    //binary search
     int left = 0;
     int right = int(nChildren_);
     int half;
@@ -114,16 +120,54 @@ size_t ApkDirNode::bytes() const
     return size;
 }
 
+//////////////////////////////////////////////////////////////////////////
+/// class ApkDirectoryCache
+//////////////////////////////////////////////////////////////////////////
+
 ApkDirectoryCache::ApkDirectoryCache()
-    : pRoot_(NULL)
+    : pBuffer_(NULL)
+    , bufferLength_(0)
+    , pRoot_(NULL)
 {}
 
 ApkDirectoryCache::~ApkDirectoryCache()
 {
-    delete pRoot_;
+    release();
 }
 
 bool ApkDirectoryCache::load(const std::string & filename)
+{
+    release();
+
+    FILE *pFile = fopen(filename.c_str(), "rb");
+    if (NULL == pFile) return false;
+
+    fseek(pFile, 0, SEEK_END);
+    bufferLength_ = ftell(pFile);
+    fseek(pFile, 0, SEEK_SET);
+
+    if (bufferLength_ > 0)
+    {
+        pBuffer_ = new char[bufferLength_];
+        if (bufferLength_ != fread(pBuffer_, 1, bufferLength_, pFile))
+        {
+            fclose(pFile);
+            return false;
+        }
+    }
+    fclose(pFile);
+
+    return init();
+}
+
+
+bool ApkDirectoryCache::init()
+{
+    pRoot_ = new ApkDirNode();
+    return NULL != pRoot_->load(pBuffer_, pBuffer_ + bufferLength_);
+}
+
+void ApkDirectoryCache::release()
 {
     if (pRoot_)
     {
@@ -131,29 +175,11 @@ bool ApkDirectoryCache::load(const std::string & filename)
         pRoot_ = NULL;
     }
 
-    FILE *pFile = fopen(filename.c_str(), "rb");
-    if (NULL == pFile) return false;
-
-    fseek(pFile, 0, SEEK_END);
-    long length = ftell(pFile);
-    fseek(pFile, 0, SEEK_SET);
-
-    buffer_.resize(length);
-    if (length > 0)
+    if (pBuffer_)
     {
-        if (length != fread(&buffer_[0], 1, length, pFile))
-        {
-            buffer_.clear();
-            fclose(pFile);
-            return false;
-        }
+        delete [] pBuffer_;
+        pBuffer_ = NULL;
     }
-
-    fclose(pFile);
-    
-    pRoot_ = new ApkDirNode();
-    char * begin = &buffer_[0];
-    return NULL != pRoot_->load(begin, begin + buffer_.length());
 }
 
 ApkDirNode * ApkDirectoryCache::find(const char * path) const
@@ -164,7 +190,38 @@ ApkDirNode * ApkDirectoryCache::find(const char * path) const
 
 size_t ApkDirectoryCache::bytes() const
 {
-    size_t size = sizeof(*this) + buffer_.capacity();
+    size_t size = sizeof(*this) + bufferLength_;
     if (pRoot_) size += pRoot_->bytes();
     return size;
 }
+
+
+#ifdef ANDROID
+
+#include <android/asset_manager_jni.h>
+
+bool ApkDirectoryCache::load(AAssetManager *mgr, const std::string & path)
+{
+    release();
+
+    AAsset* pAsset = AAssetManager_open(mgr, path.c_str(), AASSET_MODE_BUFFER);
+    if (!pAsset) return false;
+
+    bufferLength_ = AAsset_getLength(pAsset);
+    if (bufferLength_ <= 0)
+    {
+        AAsset_close(pAsset);
+        return false;
+    }
+
+    const void * pBuffer = AAsset_getBuffer(pAsset);
+
+    pBuffer_ = new char[bufferLength_];
+    memcpy(pBuffer_, pBuffer, bufferLength_)
+
+    AAsset_close(pAsset);
+
+    return init();
+}
+
+#endif //ANDROID

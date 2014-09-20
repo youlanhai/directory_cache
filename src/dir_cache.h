@@ -5,8 +5,12 @@
 
 typedef unsigned __int16 uint16;
 
-//directory for apk.
-//low memory cost, and run fast.
+//android asset manager, used to read asset in apk.
+class AAssetManager;
+
+
+// directory hierachy for apk.
+// low memory cost, and run fast.
 class ApkDirNode
 {
 public:
@@ -22,10 +26,14 @@ public:
     ApkDirNode * getChildren() const { return pChildren_; }
     size_t nChildren() const { return nChildren_; }
 
-    ApkDirNode * find(const char * name) const;
+    //use binary search, to search the path in directory hierachy.
+    ApkDirNode * find(const char * path) const;
 
-    void print(const std::string & parent) const;
+    //return the bytes the who hierachy used.
     size_t bytes() const;
+
+    //print the who directory directory to stdout.
+    void print(const std::string & parent) const;
 
 private:
     char *          pName_;
@@ -33,13 +41,18 @@ private:
     size_t          nChildren_;
 };
 
+
 class ApkDirectoryCache
 {
 public:
     ApkDirectoryCache();
     ~ApkDirectoryCache();
 
-    bool load(const std::string & filename);
+    //load the directory hierachy from file.
+    bool load(const std::string & path);
+
+    //load the directory hierachy from file. used for android.
+    bool load(AAssetManager *mgr, const std::string & path);
 
     ApkDirNode * find(const char * path) const;
 
@@ -66,6 +79,12 @@ public:
     size_t bytes() const;
 
 private:
-    std::string     buffer_;
+    bool init();
+    void release();
+
+    // cache the file content.
+    char *          pBuffer_;
+    size_t          bufferLength_;
+    // root for directory hierachy
     ApkDirNode *    pRoot_;
 };
